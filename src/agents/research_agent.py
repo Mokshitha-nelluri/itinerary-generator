@@ -2,8 +2,9 @@
 Research Agent to discover and evaluate attractions and activities.
 """
 
-from google.adk import Agent, AgentContext
-from src.tools.attraction_tools import AttractionSearchTool, RestaurantSearchTool
+from google.adk import Agent
+from google.adk.agents import invocation_context
+from tools.attraction_tools import create_attraction_search_tool, create_restaurant_search_tool
 
 class ResearchAgent(Agent):
     """Agent to research attractions and activities for the itinerary."""
@@ -20,15 +21,16 @@ class ResearchAgent(Agent):
             name="research_agent",
             description="Researches attractions and activities for the itinerary"
         )
-        self.text_model = text_model
+        object.__setattr__(self, "_text_model", text_model)
+
         
         # Register tools
-        self.attraction_tool = AttractionSearchTool(gmaps_client)
-        self.restaurant_tool = RestaurantSearchTool(gmaps_client)
-        self.register_tool(self.attraction_tool)
-        self.register_tool(self.restaurant_tool)
+        object.__setattr__(self, "attraction_tool", create_attraction_search_tool(gmaps_client))
+        object.__setattr__(self, "restaurant_tool", create_restaurant_search_tool(gmaps_client))
+
+
     
-    async def process(self, context: AgentContext):
+    async def process(self, context: invocation_context):
         """
         Research attractions and activities based on user preferences.
         

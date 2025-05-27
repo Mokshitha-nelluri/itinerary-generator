@@ -2,7 +2,8 @@
 Coordinator Agent to orchestrate the workflow between all agents.
 """
 
-from google.adk import Agent, AgentContext
+from google.adk import Agent
+from google.adk.agents import invocation_context
 
 class CoordinatorAgent(Agent):
     """Agent to coordinate the workflow between all specialized agents."""
@@ -21,12 +22,12 @@ class CoordinatorAgent(Agent):
             name="coordinator_agent",
             description="Coordinates the itinerary generation workflow"
         )
-        self.user_agent = user_agent
-        self.research_agent = research_agent
-        self.scheduling_agent = scheduling_agent
-        self.content_agent = content_agent
-    
-    async def process(self, context: AgentContext):
+        object.__setattr__(self, 'user_agent', user_agent)
+        object.__setattr__(self, 'research_agent', research_agent)
+        object.__setattr__(self, 'scheduling_agent', scheduling_agent)
+        object.__setattr__(self, 'content_agent', content_agent)
+
+    async def process(self, context: invocation_context):
         """
         Process the user request and coordinate the itinerary generation workflow.
         

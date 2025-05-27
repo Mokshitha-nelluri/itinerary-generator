@@ -2,33 +2,40 @@
 Scheduling Agent to optimize the timing and logistics of the itinerary.
 """
 
-from google.adk import Agent, AgentContext
-from src.tools.scheduling_tools import ScheduleOptimizerTool, DistanceMatrixTool
+from google.adk import Agent
+from google.adk.agents import invocation_context
+from tools.scheduling_tools import create_scheduling_tools
 
 class SchedulingAgent(Agent):
     """Agent to optimize the timing and logistics of the itinerary."""
     
-    def __init__(self, text_model, gmaps_client):
+    def __init__(self, text_model, gmaps_client, gemini_api_key=None):
         """
         Initialize the scheduling agent.
         
         Args:
             text_model: Vertex AI text generation model
             gmaps_client: Google Maps API client
+            gemini_api_key: Optional Gemini API key for enhanced recommendations
         """
         super().__init__(
             name="scheduling_agent",
             description="Optimizes the timing and logistics of the itinerary"
         )
-        self.text_model = text_model
+        object.__setattr__(self, "_text_model", text_model)
         
-        # Register tools
-        self.schedule_optimizer = ScheduleOptimizerTool(gmaps_client)
-        self.distance_matrix = DistanceMatrixTool(gmaps_client)
-        self.register_tool(self.schedule_optimizer)
-        self.register_tool(self.distance_matrix)
+        # Create and register tools
+        schedule_optimizer_tool, distance_matrix_tool = create_scheduling_tools(gmaps_client, gemini_api_key)
+        
+       
+        
+        
+        # Store references for direct access if needed
+        object.__setattr__(self, "_schedule_optimizer", schedule_optimizer_tool)
+        object.__setattr__(self, "_distance_matrix", distance_matrix_tool)
+        
     
-    async def process(self, context: AgentContext):
+    async def process(self, context: invocation_context):
         """
         Create an optimized schedule based on research results.
         
@@ -57,11 +64,21 @@ class SchedulingAgent(Agent):
         else:
             end_date = preferences.get("end_date")
         
-        # Optimize the schedule
-        schedule = await self.schedule_optimizer.execute(
+        # Get additional preferences
+        accommodation_location = preferences.get("accommodation_location")
+        start_time = preferences.get("start_time", "9:00")
+        end_time = preferences.get("end_time", "21:00")
+        return_to_accommodation = preferences.get("return_to_accommodation", True)
+        
+        # Optimize the schedule using the tool
+        schedule = await self._schedule_optimizer.execute(
             attractions=attractions,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            accommodation_location=accommodation_location,
+            start_time=start_time,
+            end_time=end_time,
+            return_to_accommodation=return_to_accommodation
         )
         
         # Store the optimized schedule in shared memory
@@ -102,10 +119,19 @@ class SchedulingAgent(Agent):
                     start_time = activity.get("start_time", "")
                     attraction = activity.get("attraction", {})
                     name = attraction.get("name", "Activity")
+                    duration = activity.get("duration", "")
                     
-                    summary += f"- {start_time}: {name}\n"
+                    summary += f"- {start_time}: {name} ({duration})\n"
             else:
-                summary += "- No activities scheduled\n"
+                note = day.get("note", "No activities scheduled")
+                summary += f"- {note}\n"
+            
+            # Add return to accommodation info if available
+            if day.get("return_to_accommodation"):
+                return_info = day["return_to_accommodation"]
+                departure = return_info.get("departure_time", "")
+                arrival = return_info.get("arrival_time", "")
+                summary += f"- {departure}: Return to accommodation (arrive {arrival})\n"
             
             summary += "\n"
         

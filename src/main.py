@@ -3,21 +3,23 @@ Main application entry point for the Itinerary Generator.
 """
 
 import os
-from google.adk import AgentApp
 from dotenv import load_dotenv
 
+from google.adk import Agent
+from google.adk.runners import Runner  
+
 # Load agents
-from src.agents.user_agent import UserInteractionAgent
-from src.agents.research_agent import ResearchAgent
-from src.agents.scheduling_agent import SchedulingAgent
-from src.agents.content_agent import ContentGeneratorAgent
-from src.agents.coordinator_agent import CoordinatorAgent
+from agents.user_agent import UserInteractionAgent
+from agents.research_agent import ResearchAgent
+from agents.scheduling_agent import SchedulingAgent
+from agents.content_agent import ContentGeneratorAgent
+from agents.coordinator_agent import CoordinatorAgent
 
 # Load configuration
-from src.config import initialize_services
+from config import initialize_services
 
-def create_app():
-    """Create and configure the agent application."""
+def create_agent_runtime():
+    """Create and configure the agent and runtime."""
     
     # Initialize services
     services = initialize_services()
@@ -36,23 +38,20 @@ def create_app():
         content_agent=content_agent
     )
     
-    # Create the application with the coordinator agent
-    app = AgentApp(coordinator)
+
+    # Create runtime using Runner
+    runtime = Runner(app_name="itinerary_generator",
+                     session_service=services["session_service"],
+                     agent=coordinator)
     
-    return app
+    return runtime
 
 def main():
-    """Run the application."""
-    
-    # Load environment variables
+    """Run the application (if needed standalone)."""
     load_dotenv()
-    
-    # Create the app
-    app = create_app()
-    
-    # Run the app
-    port = int(os.getenv("PORT", "8080"))
-    app.run(host="0.0.0.0", port=port)
+    # This file only creates the runtime, but web_interface runs the server.
+    # So main here can be minimal or empty if web_interface runs separately.
+    pass
 
 if __name__ == "__main__":
     main()

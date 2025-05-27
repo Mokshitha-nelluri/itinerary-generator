@@ -6,18 +6,14 @@ from flask import Flask, request, jsonify, render_template_string
 import threading
 import asyncio
 import uuid
-from google.adk import AgentInput
-
-# Import app creator
-from src.main import create_app
+from google.genai import types  # ✅ Corrected import
+from main import create_agent_runtime  # Import the agent runtime creator
 
 # Create Flask app
 flask_app = Flask(__name__)
 
-# Create ADK agent app
-agent_app = create_app()
-
-# Store results
+# Initialize global runtime and results store
+agent_runtime = create_agent_runtime()
 results = {}
 
 # HTML template for the web interface
@@ -27,57 +23,16 @@ HTML_TEMPLATE = """
 <head>
     <title>Itinerary Generator</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        h1 {
-            color: #2c3e50;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        input[type="text"], textarea, select {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        textarea {
-            height: 100px;
-        }
-        button {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #2980b9;
-        }
-        #result {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            white-space: pre-wrap;
-            display: none;
-        }
-        #loading {
-            display: none;
-            margin-top: 20px;
-            text-align: center;
-        }
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        h1 { color: #2c3e50; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], textarea, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        textarea { height: 100px; }
+        button { background-color: #3498db; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #2980b9; }
+        #result { margin-top: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; white-space: pre-wrap; display: none; }
+        #loading { display: none; margin-top: 20px; text-align: center; }
     </style>
 </head>
 <body>
@@ -155,74 +110,74 @@ HTML_TEMPLATE = """
 
 def run_agent(request_id, request_text):
     """Run the agent in a separate thread with its own event loop."""
-    
+
     async def _run():
         try:
-            # Create agent input
-            agent_input = AgentInput(content=request_text)
+            content = types.Content(role='user', parts=[types.Part(text=request_text)])
+            response_text = ""
             
-            # Process the input
-            response = await agent_app.agent.process(agent_input)
-            
-            # Store the result
+            app_name = "itinerary_generator"
+
+
+            agent_runtime.session_service.create_session(
+                app_name=app_name,
+                user_id=request_id,
+                session_id=request_id,
+                state={}
+            )
+
+
+            async for event in agent_runtime.run_async(
+                user_id=request_id,
+                session_id=request_id,
+                new_message=content
+            ):
+                if event.is_final_response():
+                    for part in event.content.parts:
+                        response_text += part.text
+
             results[request_id] = {
                 "status": "completed",
-                "result": response
+                "result": response_text
             }
         except Exception as e:
             results[request_id] = {
                 "status": "error",
                 "message": str(e)
             }
-    
-    # Create a new event loop for this thread
+
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
-    # Run the async function
     loop.run_until_complete(_run())
 
 @flask_app.route('/')
 def home():
-    """Render the home page."""
     return render_template_string(HTML_TEMPLATE)
 
 @flask_app.route('/generate', methods=['POST'])
 def generate():
-    """Generate an itinerary."""
     data = request.json
-    request_text = data.get('request', '')
-    
-    # Create a unique ID for this request
+    request_text = data.get('request', '').strip()
+
+    if not request_text:
+        return jsonify({"status": "error", "message": "Request text is required."}), 400
+
     request_id = str(uuid.uuid4())
-    
-    # Initialize the result
-    results[request_id] = {
-        "status": "processing"
-    }
-    
-    # Start a new thread to run the agent
+    results[request_id] = {"status": "processing"}
+
     thread = threading.Thread(target=run_agent, args=(request_id, request_text))
     thread.start()
-    
-    return jsonify({
-        "status": "processing",
-        "id": request_id
-    })
+
+    return jsonify({"status": "processing", "id": request_id})
 
 @flask_app.route('/status/<request_id>')
 def status(request_id):
-    """Get the status of a request."""
     if request_id not in results:
-        return jsonify({
-            "status": "error",
-            "message": "Request not found"
-        })
-    
+        return jsonify({"status": "error", "message": "Request not found"}), 404
     return jsonify(results[request_id])
 
 def run_web_interface():
-    """Run the web interface."""
     flask_app.run(host="0.0.0.0", port=8080, debug=True)
 
 if __name__ == "__main__":

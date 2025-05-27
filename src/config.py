@@ -3,7 +3,7 @@ from dotenv import load_dotenv #loads env vars from .env file
 import vertexai #SDK for interacting with google cloud's vertexai
 from vertexai.language_models import TextGenerationModel #class from vertxai for running text generation models
 import googlemaps #google maps client
-
+from google.adk.sessions import InMemorySessionService
 load_dotenv()
 
 #read and access configurations from .env
@@ -30,7 +30,8 @@ def initialize_services():
     
     return {
         "text_model": text_model,
-        "gmaps": gmaps
+        "gmaps": gmaps,
+        "session_service": InMemorySessionService()
     }
 
 def get_generation_config():

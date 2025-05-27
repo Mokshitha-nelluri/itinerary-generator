@@ -2,7 +2,8 @@
 User Interaction Agent to handle user requests and preference extraction.
 """
 
-from google.adk import Agent, AgentContext
+from google.adk import Agent
+from google.adk.agents import invocation_context  # ✅ Correct import
 import json
 import re
 
@@ -20,14 +21,15 @@ class UserInteractionAgent(Agent):
             name="user_interaction_agent",
             description="Extracts travel preferences from user requests"
         )
-        self.text_model = text_model
+        object.__setattr__(self, "_text_model", text_model)
+
     
-    async def process(self, context: AgentContext):
+    async def process(self, context: invocation_context):  # ✅ Use InvocationContext
         """
         Process the user input and extract travel preferences.
         
         Args:
-            context: Agent context containing user input
+            context: Invocation context containing user input
             
         Returns:
             Response acknowledging the extracted preferences
@@ -84,7 +86,7 @@ class UserInteractionAgent(Agent):
         """
         
         # Get response from LLM
-        response = self.text_model.predict(
+        response = self._text_model.predict(
             prompt,
             temperature=0.2,
             max_output_tokens=512
@@ -98,7 +100,6 @@ class UserInteractionAgent(Agent):
             json_str = response
             
         try:
-            # Clean the JSON string to ensure it's valid
             json_str = json_str.replace('\n', ' ').replace('\t', ' ')
             preferences = json.loads(json_str)
             

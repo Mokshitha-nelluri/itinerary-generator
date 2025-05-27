@@ -2,7 +2,8 @@
 Content Generator Agent to create the final itinerary with descriptions.
 """
 
-from google.adk import Agent, AgentContext
+from google.adk import Agent
+from google.adk.agents import invocation_context
 import json
 
 class ContentGeneratorAgent(Agent):
@@ -19,9 +20,10 @@ class ContentGeneratorAgent(Agent):
             name="content_generator_agent",
             description="Creates the final itinerary with descriptions"
         )
-        self.text_model = text_model
+        object.__setattr__(self, "_text_model", text_model)
+
     
-    async def process(self, context: AgentContext):
+    async def process(self, context: invocation_context):
         """
         Generate the final itinerary content.
         
@@ -141,7 +143,7 @@ Each day has been carefully planned to give you the best experience based on you
         """
         
         # Get response from LLM
-        response = self.text_model.predict(
+        response = self._text_model.predict(
             prompt,
             temperature=0.7,
             max_output_tokens=256
@@ -178,7 +180,7 @@ Each day has been carefully planned to give you the best experience based on you
         """
         
         # Get response from LLM
-        response = self.text_model.predict(
+        response = self._text_model.predict(
             prompt,
             temperature=0.7,
             max_output_tokens=512
