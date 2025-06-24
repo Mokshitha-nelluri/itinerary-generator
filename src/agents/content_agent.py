@@ -14,13 +14,22 @@ class ContentGeneratorAgent(Agent):
         Initialize the content generator agent.
         
         Args:
-            text_model: Vertex AI text generation model
+            text_model: Model name string (e.g., "gemini-1.5-pro")
         """
         super().__init__(
             name="content_generator_agent",
             description="Creates the final itinerary with descriptions"
         )
+        # Store the model name and instructions as instance variables
         object.__setattr__(self, "_text_model", text_model)
+        object.__setattr__(self, "_instructions", """
+            You are a travel content specialist. Your role is to:
+            1. Compile research and schedule data into comprehensive itineraries
+            2. Format content in an attractive, easy-to-read manner
+            3. Include practical details like addresses, hours, and tips
+            4. Create engaging descriptions that inspire travelers
+            """)
+
 
     
     async def process(self, context: invocation_context):
@@ -33,20 +42,24 @@ class ContentGeneratorAgent(Agent):
         Returns:
             The generated itinerary
         """
-        # Get user preferences and optimized schedule from shared memory
-        preferences = context.shared_memory.get("user_preferences")
-        schedule = context.shared_memory.get("optimized_schedule")
-        
-        if not preferences or not schedule:
-            return "Error: Missing user preferences or optimized schedule. Please complete those steps first."
-        
-        # Generate the itinerary content
-        itinerary = await self._generate_itinerary(preferences, schedule)
-        
-        # Store the final itinerary in shared memory
-        context.shared_memory.set("final_itinerary", itinerary)
-        
-        return itinerary
+        try:
+            # Get user preferences and optimized schedule from shared memory
+            preferences = context.shared_memory.get("user_preferences")
+            schedule = context.shared_memory.get("optimized_schedule")
+            
+            if not preferences or not schedule:
+                return "Error: Missing user preferences or optimized schedule. Please complete those steps first."
+            
+            # Generate the itinerary content
+            itinerary = await self._generate_itinerary(preferences, schedule)
+            
+            # Store the final itinerary in shared memory
+            context.shared_memory.set("final_itinerary", itinerary)
+            
+            return itinerary
+            
+        except Exception as e:
+            return f"Error generating itinerary content: {str(e)}"
     
     async def _generate_itinerary(self, preferences, schedule):
         """
@@ -125,31 +138,37 @@ Each day has been carefully planned to give you the best experience based on you
         Returns:
             Description text
         """
-        name = attraction.get("name", "this place")
-        rating = attraction.get("rating", "")
-        category = attraction.get("interest_category", "")
-        
-        # Create prompt for the description
-        prompt = f"""
-        Write a brief, engaging description (2-3 sentences) for a travel itinerary about the following attraction:
-        
-        Name: {name}
-        Category: {category}
-        Rating: {rating}
-        
-        The description should be informative and enticing, highlighting what makes this place special.
-        Do not mention the rating explicitly in your description.
-        Write in second person, addressing the traveler directly.
-        """
-        
-        # Get response from LLM
-        response = self._text_model.predict(
-            prompt,
-            temperature=0.7,
-            max_output_tokens=256
-        ).text
-        
-        return response.strip()
+        try:
+            name = attraction.get("name", "this place")
+            rating = attraction.get("rating", "")
+            category = attraction.get("interest_category", "")
+            
+            # Create prompt for the description
+            prompt = f"""
+            Write a brief, engaging description (2-3 sentences) for a travel itinerary about the following attraction:
+            
+            Name: {name}
+            Category: {category}
+            Rating: {rating}
+            
+            The description should be informative and enticing, highlighting what makes this place special.
+            Do not mention the rating explicitly in your description.
+            Write in second person, addressing the traveler directly.
+            """
+            
+            # FIXED: Use the agent's model properly through the SDK
+            response = await self.generate(
+                prompt,
+                temperature=0.7,
+                max_tokens=256
+            )
+            
+            return response.strip()
+            
+        except Exception as e:
+            # Fallback description if generation fails
+            name = attraction.get("name", "this attraction")
+            return f"Visit {name}, a wonderful destination that's sure to enhance your travel experience."
     
     async def _generate_travel_tips(self, preferences, destination):
         """
@@ -162,28 +181,33 @@ Each day has been carefully planned to give you the best experience based on you
         Returns:
             Travel tips text
         """
-        budget = preferences.get("budget", "moderate")
-        interests = ", ".join(preferences.get("interests", ["travel"]))
-        
-        # Create prompt for travel tips
-        prompt = f"""
-        Write a brief section of travel tips for a trip to {destination} with a {budget} budget, focusing on {interests}.
-        
-        Include:
-        1. A tip about local transportation
-        2. A tip about local customs or etiquette
-        3. A money-saving tip relevant to the budget level
-        4. A tip related to the main interests
-        
-        Format each tip with a bullet point. Keep each tip concise (1-2 sentences).
-        Write in second person, addressing the traveler directly.
-        """
-        
-        # Get response from LLM
-        response = self._text_model.predict(
-            prompt,
-            temperature=0.7,
-            max_output_tokens=512
-        ).text
-        
-        return f"\n## Travel Tips\n\n{response.strip()}\n"
+        try:
+            budget = preferences.get("budget", "moderate")
+            interests = ", ".join(preferences.get("interests", ["travel"]))
+            
+            # Create prompt for travel tips
+            prompt = f"""
+            Write a brief section of travel tips for a trip to {destination} with a {budget} budget, focusing on {interests}.
+            
+            Include:
+            1. A tip about local transportation
+            2. A tip about local customs or etiquette
+            3. A money-saving tip relevant to the budget level
+            4. A tip related to the main interests
+            
+            Format each tip with a bullet point. Keep each tip concise (1-2 sentences).
+            Write in second person, addressing the traveler directly.
+            """
+            
+            # FIXED: Use the agent's model properly through the SDK
+            response = await self.generate(
+                prompt,
+                temperature=0.7,
+                max_tokens=512
+            )
+            
+            return f"\n## Travel Tips\n\n{response.strip()}\n"
+            
+        except Exception as e:
+            # Fallback tips if generation fails
+            return f"\n## Travel Tips\n\n• Research local transportation options before you arrive\n• Respect local customs and dress codes\n• Look for local markets and street food for budget-friendly meals\n• Check opening hours and book popular attractions in advance\n"

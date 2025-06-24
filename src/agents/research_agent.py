@@ -2,9 +2,10 @@
 Research Agent to discover and evaluate attractions and activities.
 """
 
+import os
 from google.adk import Agent
 from google.adk.agents import invocation_context
-from tools.attraction_tools import create_attraction_search_tool, create_restaurant_search_tool
+from tools.attraction_tools import create_attraction_search_tool, create_restaurant_search_tool, create_lodging_search_tool
 
 class ResearchAgent(Agent):
     """Agent to research attractions and activities for the itinerary."""
@@ -14,22 +15,37 @@ class ResearchAgent(Agent):
         Initialize the research agent.
         
         Args:
-            text_model: Vertex AI text generation model
+            text_model: Model name string (e.g., "gemini-1.5-pro") OR GenerativeModel object
             gmaps_client: Google Maps API client
         """
+        # Extract model name if it's a GenerativeModel object
+        if hasattr(text_model, 'model_name'):
+            model_name = text_model.model_name
+        elif isinstance(text_model, str):
+            model_name = text_model
+        else:
+            model_name = "gemini-1.5-pro"  # fallback
+        
         super().__init__(
             name="research_agent",
-            description="Researches attractions and activities for the itinerary"
+            description="Researches attractions and activities for the itinerary",
+            model=text_model  # Pass the model to the parent constructor
         )
-        object.__setattr__(self, "_text_model", text_model)
-
         
-        # Register tools
-        object.__setattr__(self, "attraction_tool", create_attraction_search_tool(gmaps_client))
-        object.__setattr__(self, "restaurant_tool", create_restaurant_search_tool(gmaps_client))
+        # Store the maps client
+        self._gmaps_client = gmaps_client
+        
+        # Initialize tools
+        try:
+            object.__setattr__(self, "attraction_tool", create_attraction_search_tool(gmaps_client))
+            object.__setattr__(self, "restaurant_tool", create_restaurant_search_tool(gmaps_client))
+            object.__setattr__(self, "lodging_tool", create_lodging_search_tool(gmaps_client))
+        except Exception as e:
+            print(f"Warning: Could not initialize research tools: {e}")
+            object.__setattr__(self, "attraction_tool", None)
+            object.__setattr__(self, "restaurant_tool", None)
+            object.__setattr__(self, "lodging_tool", None)
 
-
-    
     async def process(self, context: invocation_context):
         """
         Research attractions and activities based on user preferences.
@@ -40,57 +56,100 @@ class ResearchAgent(Agent):
         Returns:
             Status message after completing research
         """
-        # Get user preferences from shared memory
-        preferences = context.shared_memory.get("user_preferences")
-        
-        if not preferences:
-            return "Error: No user preferences found. Please provide your travel preferences first."
-        
-        destination = preferences["destination"]
-        interests = preferences["interests"]
-        budget = preferences["budget"]
-        
-        # Research attractions based on interests
-        all_attractions = []
-        
-        # For each interest, search for relevant attractions
-        for interest in interests:
-            # Map user interests to search keywords and types
-            search_params = self._map_interest_to_search_params(interest)
+        try:
+            # Check if tools are available
+            if not self.attraction_tool or not self.restaurant_tool:
+                return "Error: Research tools are not properly initialized. Please check your Google Maps API configuration."
             
-            # Search for attractions
-            attractions = await self.attraction_tool.execute(
-                destination, 
-                keywords=search_params["keywords"],
-                type_filter=search_params["type"]
-            )
+            # Get user preferences from shared memory
+            preferences = context.shared_memory.get("user_preferences")
             
-            if isinstance(attractions, list):
-                # Add the interest category to each attraction
-                for attraction in attractions:
-                    attraction["interest_category"] = interest
-                all_attractions.extend(attractions)
+            if not preferences:
+                return "Error: No user preferences found. Please provide your travel preferences first."
+            
+            destination = preferences.get("destination")
+            interests = preferences.get("interests", [])
+            budget = preferences.get("budget", "moderate")
+            
+            if not destination:
+                return "Error: No destination specified in user preferences."
+            
+            # Research attractions based on interests
+            all_attractions = []
+            
+            # For each interest, search for relevant attractions
+            for interest in interests:
+                try:
+                    # Map user interests to search keywords and types
+                    search_params = self._map_interest_to_search_params(interest)
+                    
+                    # Search for attractions - Fixed method call
+                    attractions = await self.attraction_tool.execute(
+                        destination, 
+                        keywords=search_params["keywords"],
+                        type_filter=search_params["type"]
+                    )
+                    
+                    if isinstance(attractions, list):
+                        # Add the interest category to each attraction
+                        for attraction in attractions:
+                            attraction["interest_category"] = interest
+                        all_attractions.extend(attractions)
+                        
+                except Exception as e:
+                    print(f"Error searching for {interest} attractions: {e}")
+                    continue
+                    
+            # Research restaurants based on budget
+            try:
+                price_level = self._map_budget_to_price_level(budget)
+                restaurants = await self.restaurant_tool.execute(
+                    destination,
+                    price_level=price_level
+                )
                 
-        # Research restaurants based on budget
-        price_level = self._map_budget_to_price_level(budget)
-        restaurants = await self.restaurant_tool.execute(
-            destination,
-            price_level=price_level
-        )
-        
-        if isinstance(restaurants, list):
-            # Mark these as restaurants
-            for restaurant in restaurants:
-                restaurant["interest_category"] = "dining"
-            all_attractions.extend(restaurants)
-        
-        # Store research results in shared memory
-        context.shared_memory.set("research_results", all_attractions)
-        
-        # Create a summary of findings
-        summary = self._create_research_summary(all_attractions)
-        
-        return f"Research completed! I've found {len(all_attractions)} places of interest in {destination}.\n\n{summary}"
+                if isinstance(restaurants, list):
+                    # Mark these as restaurants
+                    for restaurant in restaurants:
+                        restaurant["interest_category"] = "dining"
+                    all_attractions.extend(restaurants)
+                    
+            except Exception as e:
+                print(f"Error searching for restaurants: {e}")
+            
+            # Lodging suggestion (optional)
+            if preferences.get("needs_lodging_suggestions"):
+                try:
+                    if not self.lodging_tool:
+                        print("Lodging tool not available.")
+                    else:
+                        lodging_results = await self.lodging_tool.execute(
+                            destination=destination,
+                            radius=3000
+                        )
+
+                        if isinstance(lodging_results, list) and lodging_results:
+                            # Store best lodging info
+                            top_lodging = sorted(lodging_results, key=lambda x: x.get("rating", 0), reverse=True)[0]
+                            context.shared_memory.set("lodging_suggestions", lodging_results)
+                            context.shared_memory.set("accommodation_location", top_lodging["geometry"]["location"])
+                        else:
+                            print("No lodging results found.")
+                except Exception as e:
+                    print(f"Error searching for lodging: {e}")
+
+            # Store research results in shared memory
+            context.shared_memory.set("research_results", all_attractions)
+            
+            # Create a summary of findings
+            summary = self._create_research_summary(all_attractions)
+            
+            return f"Research completed! I've found {len(all_attractions)} places of interest in {destination}.\n\n{summary}"
+            
+        except Exception as e:
+            error_msg = f"An error occurred during research: {str(e)}"
+            print(f"ResearchAgent error: {error_msg}")
+            return error_msg
     
     def _map_interest_to_search_params(self, interest):
         """
@@ -104,46 +163,58 @@ class ResearchAgent(Agent):
         """
         interest_mapping = {
             "food": {
-                "keywords": "food tour",
+                "keywords": "food tour local cuisine",
                 "type": "tourist_attraction"
             },
             "dining": {
-                "keywords": "",
+                "keywords": "restaurant",
                 "type": "restaurant"
             },
             "culture": {
-                "keywords": "cultural attraction",
+                "keywords": "cultural attraction heritage",
                 "type": "museum"
             },
             "history": {
-                "keywords": "historical site",
+                "keywords": "historical site monument",
                 "type": "museum"
             },
             "art": {
-                "keywords": "art",
+                "keywords": "art gallery museum",
                 "type": "museum"
             },
             "nature": {
-                "keywords": "nature",
+                "keywords": "nature park garden",
+                "type": "park"
+            },
+            "outdoor": {
+                "keywords": "outdoor activities park",
                 "type": "park"
             },
             "shopping": {
-                "keywords": "",
+                "keywords": "shopping market",
                 "type": "shopping_mall"
             },
             "adventure": {
-                "keywords": "adventure",
+                "keywords": "adventure activity tour",
                 "type": "tourist_attraction"
             },
             "relaxation": {
-                "keywords": "spa",
+                "keywords": "spa wellness relaxation",
                 "type": "spa"
+            },
+            "nightlife": {
+                "keywords": "nightlife entertainment",
+                "type": "night_club"
+            },
+            "entertainment": {
+                "keywords": "entertainment show theater",
+                "type": "tourist_attraction"
             }
         }
         
         # Default values
         default_params = {
-            "keywords": interest,
+            "keywords": f"{interest} attraction",
             "type": "tourist_attraction"
         }
         
@@ -161,11 +232,15 @@ class ResearchAgent(Agent):
         """
         budget_mapping = {
             "budget": 1,
+            "low": 1,
             "moderate": 2,
-            "luxury": 3
+            "medium": 2,
+            "high": 3,
+            "luxury": 4,
+            "premium": 4
         }
         
-        return budget_mapping.get(budget.lower())
+        return budget_mapping.get(budget.lower(), 2)  # Default to moderate
     
     def _create_research_summary(self, attractions):
         """
@@ -177,6 +252,9 @@ class ResearchAgent(Agent):
         Returns:
             Summary text
         """
+        if not attractions:
+            return "No attractions found. This might be due to API limitations or the destination name not being recognized."
+        
         # Group by interest category
         categories = {}
         for attraction in attractions:
@@ -196,8 +274,10 @@ class ResearchAgent(Agent):
             if top_items:
                 summary += " including:\n"
                 for item in top_items:
-                    rating = f" (Rating: {item.get('rating', 'N/A')})" if item.get("rating") else ""
-                    summary += f"- {item.get('name', 'Unnamed')}{rating}\n"
+                    name = item.get('name', 'Unnamed')
+                    rating = item.get('rating')
+                    rating_text = f" (★{rating})" if rating else ""
+                    summary += f"  • {name}{rating_text}\n"
             else:
                 summary += "\n"
                 

@@ -1,7 +1,6 @@
 """
-Final Configuration file for the Itinerary Generator.
+Configuration file for the Itinerary Generator.
 Handles initialization of Google Cloud services, Google Maps, and AI models.
-Production-ready with proper error handling and model migration support.
 """
 import os
 from dotenv import load_dotenv
@@ -22,13 +21,13 @@ def initialize_services():
     google_api_key = os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
     google_maps_key = os.getenv('GOOGLE_MAPS_API_KEY')
     model_name = os.getenv('MODEL_NAME', 'gemini-1.5-pro')
-    project_id = os.getenv('PROJECT_ID')
-    location = os.getenv('LOCATION', 'us-central1')
     
-    # Force use of Gemini model if deprecated text-bison is detected
+    # Force use of Gemini model if text-bison is detected (it's deprecated)
     if 'text-bison' in model_name:
         print(f"⚠️  Detected deprecated model {model_name}, switching to gemini-1.5-pro")
         model_name = 'gemini-1.5-pro'
+    project_id = os.getenv('PROJECT_ID')
+    location = os.getenv('LOCATION', 'us-central1')
     
     # Validate required environment variables
     if not google_api_key:
@@ -43,12 +42,12 @@ def initialize_services():
     # Initialize AI model (supports both Vertex AI and Gemini models)
     try:
         if model_name.startswith('text-') or '@' in model_name:
-            # Vertex AI model (like text-bison@002) - mostly deprecated
+            # Vertex AI model (like text-bison@002)
             vertexai.init(project=project_id, location=location)
             text_model = TextGenerationModel.from_pretrained(model_name)
             model_type = "vertex_ai"
         else:
-            # Gemini model (like gemini-1.5-pro) - recommended
+            # Gemini model (like gemini-1.5-pro)
             genai.configure(api_key=google_api_key)
             text_model = genai.GenerativeModel(model_name)
             model_type = "gemini"
@@ -100,38 +99,6 @@ def get_generation_config():
     }
 
 
-def generate_text(services, prompt, **kwargs):
-    """
-    Universal text generation function that works with both model types.
-    
-    Args:
-        services: Dictionary returned from initialize_services()
-        prompt: Text prompt for generation
-        **kwargs: Additional generation parameters
-    
-    Returns:
-        Generated text string
-    """
-    model = services["text_model"]
-    model_type = services["model_type"]
-    
-    # Merge default config with any overrides
-    config = get_generation_config()
-    config.update(kwargs)
-    
-    try:
-        if model_type == "vertex_ai":
-            # Vertex AI model
-            response = model.predict(prompt, **config)
-            return response.text if hasattr(response, 'text') else str(response)
-        else:
-            # Gemini model
-            response = model.generate_content(prompt, generation_config=config)
-            return response.text if response and response.text else ""
-    except Exception as e:
-        raise RuntimeError(f"Text generation failed: {e}")
-
-
 def test_configuration():
     """Test that all services can be initialized properly."""
     try:
@@ -139,6 +106,7 @@ def test_configuration():
         
         # Test Google Maps client
         try:
+            # Simple test - geocode a well-known location
             test_result = services["gmaps"].geocode("Times Square, New York")
             if test_result:
                 print("✅ Google Maps API test passed!")
@@ -147,9 +115,24 @@ def test_configuration():
         except Exception as e:
             print(f"❌ Google Maps API test failed: {e}")
         
-        # Test AI model using universal function
+        # Test AI model
         try:
-            response_text = generate_text(services, "Say 'Hello, configuration test successful!'")
+            test_prompt = "Say 'Hello, configuration test successful!'"
+            
+            if services["model_type"] == "vertex_ai":
+                # Vertex AI model testing
+                response = services["text_model"].predict(
+                    test_prompt,
+                    **get_generation_config()
+                )
+                response_text = response.text if hasattr(response, 'text') else str(response)
+            else:
+                # Gemini model testing
+                response = services["text_model"].generate_content(
+                    test_prompt,
+                    generation_config=get_generation_config()
+                )
+                response_text = response.text if response and response.text else str(response)
             
             if response_text:
                 print("✅ AI model test passed!")
@@ -169,22 +152,22 @@ def test_configuration():
 
 # Environment variable template for .env file
 ENV_TEMPLATE = """
+# Required environment variables for Itinerary Generator
+
+# Google AI API Key (for Gemini models)
+GOOGLE_API_KEY=your_google_ai_api_key_here
+# Alternative name for the same key
+GEMINI_API_KEY=your_google_ai_api_key_here
+
+# Google Maps API Key
+GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
+
 # Google Cloud Project Configuration
 PROJECT_ID=your_google_cloud_project_id
 LOCATION=us-central1
 
-# API Keys (IMPORTANT: Keep these secret!)
-GOOGLE_API_KEY=your_google_ai_api_key_here
-GEMINI_API_KEY=your_google_ai_api_key_here
-GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
-
 # AI Model Configuration
-MODEL_NAME=gemini-1.5-pro
-# Alternative models:
-# MODEL_NAME=gemini-1.5-flash
-# MODEL_NAME=gemini-pro
-
-# Model Parameters
+MODEL_NAME=text-bison@002
 TEMPERATURE=0.2
 MAX_OUTPUT_TOKENS=1024
 """
@@ -200,37 +183,6 @@ def create_env_template():
         print("✅ .env file already exists.")
 
 
-# Quick usage example
-def example_usage():
-    """Example of how to use the configuration in your main application."""
-    try:
-        # Initialize services
-        services = initialize_services()
-        
-        # Generate travel content
-        itinerary_prompt = """
-        Create a brief 1-day Paris itinerary focusing on:
-        - 2-3 major landmarks
-        - 1 museum visit
-        - 1 local dining recommendation
-        Keep it concise and practical.
-        """
-        
-        itinerary = generate_text(services, itinerary_prompt)
-        print("\n📋 Sample Itinerary Generation:")
-        print("-" * 40)
-        print(itinerary)
-        
-        # Use Google Maps for location data
-        gmaps = services["gmaps"]
-        eiffel_tower = gmaps.geocode("Eiffel Tower, Paris")[0]
-        location = eiffel_tower['geometry']['location']
-        print(f"\n📍 Eiffel Tower coordinates: {location['lat']}, {location['lng']}")
-        
-    except Exception as e:
-        print(f"❌ Example failed: {e}")
-
-
 if __name__ == "__main__":
     print("🔧 Testing Itinerary Generator Configuration...")
     print("=" * 50)
@@ -243,11 +195,6 @@ if __name__ == "__main__":
     
     if success:
         print("\n🎉 All tests passed! Your configuration is ready to use.")
-        
-        # Show example usage
-        print("\n" + "=" * 50)
-        example_usage()
-        
     else:
         print("\n❌ Some tests failed. Please check your environment variables and API keys.")
         print("\nMake sure you have:")

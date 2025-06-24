@@ -176,3 +176,32 @@ def create_location_tools(gmaps_client):
     attraction_tool = create_attraction_search_tool(gmaps_client)
     restaurant_tool = create_restaurant_search_tool(gmaps_client)
     return attraction_tool, restaurant_tool
+
+
+
+def create_lodging_search_tool(gmaps_client):
+    async def lodging_tool(context, **kwargs):
+        destination = kwargs.get("destination")  # city name
+        radius = kwargs.get("radius", 3000)
+
+        # Use geocoding to convert destination to lat/lng
+        geocode = gmaps_client.geocode(destination)
+        if not geocode:
+            return {"error": f"Could not geocode destination: {destination}"}
+
+        location = geocode[0]["geometry"]["location"]
+
+        # Search for lodging near location
+        response = gmaps_client.places_nearby(
+            location=location,
+            radius=radius,
+            type="lodging"
+        )
+
+        return response.get("results", [])
+
+    return FunctionTool(
+        name="lodging_search",
+        description="Finds lodging options near a destination using Google Maps",
+        func=lodging_tool
+    )

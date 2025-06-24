@@ -1,13 +1,14 @@
 """
-Simple web interface for the Itinerary Generator.
+Simple web interface for the Itinerary Generator with improved session management.
 """
 
 from flask import Flask, request, jsonify, render_template_string
 import threading
 import asyncio
 import uuid
-from google.genai import types  # ✅ Corrected import
-from main import create_agent_runtime  # Import the agent runtime creator
+from google.genai import types
+from main import create_agent_runtime
+import os
 
 # Create Flask app
 flask_app = Flask(__name__)
@@ -118,15 +119,25 @@ def run_agent(request_id, request_text):
             
             app_name = "itinerary_generator"
 
+            # Check if session already exists before creating
+            try:
+                existing_session = await agent_runtime.session_service.get_session(
+                    app_name=app_name,
+                    user_id=request_id,
+                    session_id=request_id
+                )
+                print(f"Using existing session: {existing_session.id}")
+            except Exception:
+                # Session doesn't exist, create a new one
+                session = await agent_runtime.session_service.create_session(
+                    app_name=app_name,
+                    user_id=request_id,
+                    session_id=request_id,
+                    state={}
+                )
+                print(f"Created new session: {session.id}")
 
-            agent_runtime.session_service.create_session(
-                app_name=app_name,
-                user_id=request_id,
-                session_id=request_id,
-                state={}
-            )
-
-
+            # Run the agent
             async for event in agent_runtime.run_async(
                 user_id=request_id,
                 session_id=request_id,
@@ -140,16 +151,21 @@ def run_agent(request_id, request_text):
                 "status": "completed",
                 "result": response_text
             }
+            
         except Exception as e:
+            print(f"Error in run_agent: {str(e)}")
             results[request_id] = {
                 "status": "error",
                 "message": str(e)
             }
 
-
+    # Create new event loop for this thread
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(_run())
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()
 
 @flask_app.route('/')
 def home():
@@ -166,7 +182,9 @@ def generate():
     request_id = str(uuid.uuid4())
     results[request_id] = {"status": "processing"}
 
+    # Start agent in separate thread
     thread = threading.Thread(target=run_agent, args=(request_id, request_text))
+    thread.daemon = True  # Make thread daemon so it doesn't prevent app shutdown
     thread.start()
 
     return jsonify({"status": "processing", "id": request_id})
@@ -177,8 +195,42 @@ def status(request_id):
         return jsonify({"status": "error", "message": "Request not found"}), 404
     return jsonify(results[request_id])
 
+# Optional: Add endpoint to list active sessions (for debugging)
+@flask_app.route('/sessions')
+def list_sessions():
+    async def _list_sessions():
+        try:
+            sessions = await agent_runtime.session_service.list_sessions(
+                app_name="itinerary_generator"
+            )
+            session_info = [
+                {
+                    "id": session.id,
+                    "user_id": session.user_id,
+                    "created_at": str(session.created_at) if hasattr(session, 'created_at') else 'Unknown'
+                }
+                for session in sessions
+            ]
+            return {"sessions": session_info}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    # Run the async function
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(_list_sessions())
+        if "error" in result:
+            return jsonify(result), 500
+        return jsonify(result)
+    finally:
+        loop.close()
+
+
 def run_web_interface():
-    flask_app.run(host="0.0.0.0", port=8080, debug=True)
+    port = int(os.environ.get("PORT", 8080))
+    print(f"Starting Itinerary Generator Web Interface on port {port}...")
+    flask_app.run(host="0.0.0.0", port=port, debug=False)
 
 if __name__ == "__main__":
     run_web_interface()

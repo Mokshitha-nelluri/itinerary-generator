@@ -25,17 +25,19 @@ def create_agent_runtime():
     services = initialize_services()
     
     # Create specialized agents
-    user_agent = UserInteractionAgent(services["text_model"])
-    research_agent = ResearchAgent(services["text_model"], services["gmaps"])
-    scheduling_agent = SchedulingAgent(services["text_model"], services["gmaps"])
-    content_agent = ContentGeneratorAgent(services["text_model"])
+    user_agent = UserInteractionAgent(services["model_name"])
+    research_agent = ResearchAgent(services["model_name"], services["gmaps"])
+    scheduling_agent = SchedulingAgent(services["model_name"], services["gmaps"])
+    content_agent = ContentGeneratorAgent(services["model_name"])
     
     # Create coordinator agent
     coordinator = CoordinatorAgent(
+        text_model = services["model_name"],
         user_agent=user_agent,
         research_agent=research_agent,
         scheduling_agent=scheduling_agent,
-        content_agent=content_agent
+        content_agent=content_agent,
+        
     )
     
 
