@@ -16,6 +16,7 @@ certifi==2023.11.17
 chardet==5.2.0
 idna==3.6
 google.adk
+google-genai
 
 
 python-dotenv
