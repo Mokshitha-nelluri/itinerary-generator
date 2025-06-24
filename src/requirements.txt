@@ -11,7 +11,7 @@ protobuf==3.20.3
 flask==2.3.2                   # Web server if needed
 typing-extensions==4.7.1       # For typing compatibility
 requests-oauthlib==1.3.1       # OAuth2 helper for Google APIs
-google-genai
+
 # Dependencies often needed for requests and Google Cloud SDKs:
 certifi==2023.11.17
 chardet==5.2.0
