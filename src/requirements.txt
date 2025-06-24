@@ -3,9 +3,8 @@ PyYAML==6.0.1                  # Config parsing (YAML files)
 google-auth==2.22.0            # Google auth for APIs
 google-auth-httplib2==0.1.0    # Auth helper
 google-api-python-client==2.96.0 # Google APIs client library
-grpcio==1.48.2
-grpcio-tools==1.48.2
-# For gRPC communication (often needed with Google APIs)
+
+
 protobuf==3.20.3
 # Google protocol buffers support
 flask==2.3.2                   # Web server if needed
